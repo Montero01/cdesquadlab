@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#120a07" />
+<title>CDE · Simulador de Esquadrias e Vidros</title>
+
+<!-- Tailwind CSS via CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          base:   '#120a07', // Fundo escuro aquecido
+          panel:  '#1c110c', // Painel lateral
+          panel2: '#261812', // Painel de elementos
+          line:   '#3d261a', // Bordas
+          accent: '#e65c00', // Laranja principal da imagem
+          accent2:'#c93a0b'  // Vermelho/Laranja escuro
+        },
+        fontFamily: { sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'] }
+      }
+    }
+  };
+</script>
+
+<style>
+  html, body { -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+
+  /* Canvas: bloqueia gestos do navegador durante o desenho */
+  #canvasWrap, #view { touch-action: none; user-select: none; -webkit-user-select: none; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #3d261a; border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  input[type="range"] { accent-color: #e65c00; }
+
+  /* -------- Indicador de passos -------- */
+  .step {
+    display: flex; align-items: center; gap: .5rem;
+    border-radius: .75rem; border: 1px solid #3d261a;
+    background: #1c110c; padding: .5rem .55rem;
+    transition: all .25s ease; min-width: 0;
+  }
+  .step .step-num {
+    width: 1.35rem; height: 1.35rem; border-radius: 9999px; flex: none;
+    display: grid; place-items: center;
+    font-size: .65rem; font-weight: 800;
+    background: #261812; color: #8b6b5c; transition: all .25s ease;
+  }
+  .step[data-state="active"] {
+    border-color: rgba(230, 92, 0, 0.55);
+    background: rgba(230, 92, 0, 0.08);
+    box-shadow: 0 0 0 1px rgba(230, 92, 0, 0.12), 0 6px 18px -10px rgba(230, 92, 0, 0.6);
+  }
+  .step[data-state="active"] .step-num { background: #e65c00; color: #120a07; }
+  .step[data-state="done"] .step-num { background: #14532d; color: #86efac; }
+  .step[data-state="done"] { border-color: rgba(34,197,94,.35); }
+
+  .swatch-active { outline: 2px solid #e65c00; outline-offset: 2px; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+    border-radius: .75rem; font-size: .75rem; font-weight: 600;
+    padding: .55rem .85rem; transition: all .18s ease; cursor: pointer;
+    border: 1px solid #3d261a; background: #261812; color: #d1c0b8;
+    white-space: nowrap;
+  }
+  .btn:hover  { border-color: #5c3a28; background: #301f17; color: #fff; }
+  .btn:active { transform: scale(.97); }
+
+  .btn-accent {
+    background: linear-gradient(180deg, #f0651a, #c93a0b);
+    border-color: #e65c00; color: #fff; font-weight: 700;
+  }
+  .btn-accent:hover { background: linear-gradient(180deg, #ff7a33, #e65c00); color: #fff; }
+
+  /* Fade de entrada do canvas */
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .fade-up { animation: fadeUp .35s ease both; }
+</style>
+</head>
+
+<body class="min-h-screen bg-base text-slate-200 font-sans antialiased selection:bg-accent/30">
+
+<div class="flex flex-col lg:flex-row lg:h-screen lg:overflow-hidden">
+
+  <!-- ============================================================ -->
+  <!-- MAIN                                                        -->
+  <!-- ============================================================ -->
+  <main class="flex-1 flex flex-col min-h-0">
+
+    <!-- Topbar -->
+    <header class="shrink-0 border-b border-line bg-panel/80 backdrop-blur px-4 py-3 flex items-center gap-3">
+      <!-- Logo CDE -->
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-accent2 grid place-items-center shadow-lg shadow-accent/20">
+        <span class="text-white font-black text-sm tracking-tighter">CDE</span>
+      </div>
+      <div class="min-w-0">
+        <h1 class="text-sm font-bold tracking-tight text-white truncate">
+          Simulador de Esquadrias
+        </h1>
+        <p class="text-[11px] text-slate-400 truncate">Visualização de produtos direto na obra</p>
+      </div>
+    </header>
+
+    <!-- Passos -->
+    <div class="shrink-0 px-3 pt-3">
+      <div class="grid grid-cols-3 gap-2 max-w-2xl mx-auto">
+        <div id="step1" class="step" data-state="active">
+          <span class="step-num">1</span>
+          <span class="text-[10px] leading-tight font-medium text-slate-300">Suba a foto</span>
+        </div>
+        <div id="step2" class="step" data-state="idle">
+          <span class="step-num">2</span>
+          <span class="text-[10px] leading-tight font-medium text-slate-300">Marque os 4 cantos</span>
+        </div>
+        <div id="step3" class="step" data-state="idle">
+          <span class="step-num">3</span>
+          <span class="text-[10px] leading-tight font-medium text-slate-300">Escolha o produto</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Palco -->
+    <div class="flex-1 min-h-0 p-3 flex items-start lg:items-center justify-center overflow-auto">
+      <div class="w-full max-w-2xl mx-auto">
+
+        <!-- Dropzone -->
+        <div id="dropzone"
+             class="relative rounded-2xl border-2 border-dashed border-line bg-panel/60 p-7 sm:p-10 text-center transition-colors hover:border-accent/50">
+          <div class="mx-auto w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 grid place-items-center mb-4">
+            <svg class="w-7 h-7 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+          </div>
+          <h2 class="text-base font-semibold text-white">Comece pela foto do ambiente</h2>
+          <p class="mt-1.5 text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+            Fotografe a parede onde a esquadria será instalada. Uma foto de frente,
+            com o vão inteiro visível, gera o melhor resultado de perspectiva.
+          </p>
+
+          <div class="mt-5 flex flex-col sm:flex-row gap-2 justify-center">
+            <label class="btn btn-accent cursor-pointer">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>
+              </svg>
+              Escolher da galeria
+              <input id="inputGaleria" type="file" accept="image/*" class="hidden">
+            </label>
+
+            <label class="btn cursor-pointer">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+              </svg>
+              Tirar foto
+              <input id="inputCamera" type="file" accept="image/*" capture="environment" class="hidden">
+            </label>
+          </div>
+        </div>
+
+        <!-- Área do canvas -->
+        <div id="canvasWrap"
+             class="hidden relative rounded-2xl overflow-hidden border border-line bg-black shadow-2xl shadow-black/60 fade-up">
+          <!-- Camada 1: foto -->
+          <canvas id="view" class="block w-full h-auto"></canvas>
+          <!-- Camada 2: produto com perspectiva + blend mode -->
+          <canvas id="overlay" class="absolute inset-0 w-full h-full pointer-events-none" style="mix-blend-mode:multiply;"></canvas>
+          <!-- Camada 3: marcadores de UI -->
+          <canvas id="ui" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+
+          <!-- Dica flutuante -->
+          <div id="hint"
+               class="absolute left-1/2 -translate-x-1/2 bottom-3 px-3 py-1.5 rounded-full bg-black/70 backdrop-blur border border-white/10 text-[11px] text-slate-300 whitespace-nowrap pointer-events-none">
+            Toque nos 4 cantos do vão
+          </div>
+        </div>
+
+        <!-- Barra de ações -->
+        <div id="toolbar" class="hidden mt-3 flex flex-wrap items-center gap-2">
+          <button id="btnLimpar" class="btn">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>
+            </svg>
+            Limpar pontos
+          </button>
+          <button id="btnTrocar" class="btn">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
+            </svg>
+            Trocar foto
+          </button>
+          <button id="btnSalvar" class="btn btn-accent ml-auto">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>
+            </svg>
+            Salvar imagem
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- ============================================================ -->
+  <!-- SIDEBAR                                                      -->
+  <!-- ============================================================ -->
+  <aside class="w-full lg:w-[370px] shrink-0 border-t lg:border-t-0 lg:border-l border-line bg-panel lg:overflow-y-auto">
+    <div class="p-4 space-y-6">
+
+      <!-- Produto -->
+      <section>
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-1.5 h-4 rounded-full bg-accent"></span>
+          <h3 class="text-[11px] uppercase tracking-[0.14em] font-bold text-slate-400">Produto</h3>
+        </div>
+
+        <div class="relative">
+          <select id="selProduto"
+                  class="w-full appearance-none rounded-xl border border-line bg-panel2 px-3 py-2.5 pr-9 text-sm text-slate-100 font-medium outline-none transition focus:border-accent/70 focus:ring-2 focus:ring-accent/20 cursor-pointer">
+          </select>
+          <svg class="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"
+               viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m6 9 6 6 6-6"/>
+          </svg>
+        </div>
+
+        <div id="produtoInfo" class="mt-2.5 rounded-xl bg-panel2 border border-line p-3 text-[11px] text-slate-400"></div>
+      </section>
+
+      <!-- Cor do alumínio -->
+      <section>
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-1.5 h-4 rounded-full bg-accent"></span>
+          <h3 class="text-[11px] uppercase tracking-[0.14em] font-bold text-slate-400">Cor do alumínio</h3>
+        </div>
+        <div id="gridCores" class="grid grid-cols-3 gap-2"></div>
+      </section>
+
+      <!-- Tipo de vidro -->
+      <section>
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-1.5 h-4 rounded-full bg-accent"></span>
+          <h3 class="text-[11px] uppercase tracking-[0.14em] font-bold text-slate-400">Tipo de vidro</h3>
+        </div>
+        <div id="gridVidros" class="grid grid-cols-3 gap-2"></div>
+      </section>
+
+      <!-- Ajuste estético -->
+      <section>
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-1.5 h-4 rounded-full bg-accent"></span>
+          <h3 class="text-[11px] uppercase tracking-[0.14em] font-bold text-slate-400">Integração com a foto</h3>
+        </div>
+
+        <div class="rounded-xl bg-panel2 border border-line p-3 space-y-3">
+          <div>
+            <label class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Blend mode</label>
+            <div class="relative mt-1.5">
+              <select id="selBlend"
+                      class="w-full appearance-none rounded-lg border border-line bg-panel px-2.5 py-2 pr-8 text-xs text-slate-200 outline-none focus:border-accent/70 cursor-pointer">
+                <option value="multiply">Multiply · absorve sombras</option>
+                <option value="overlay">Overlay · realça contraste</option>
+                <option value="soft-light">Soft-light · suave</option>
+                <option value="normal">Normal · sem mistura</option>
+              </select>
+              <svg class="w-3.5 h-3.5 text-slate-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m6 9 6 6 6-6"/>
+              </svg>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Opacidade</label>
+              <span id="lblOpacidade" class="text-[11px] font-bold text-accent">92%</span>
+            </div>
+            <input id="rangeOpacidade" type="range" min="30" max="100" value="92" step="1"
+                   class="w-full mt-2 h-1.5 rounded-full appearance-none bg-line cursor-pointer">
+          </div>
+        </div>
+      </section>
+
+      <!-- Rodapé -->
+      <p class="text-[10px] leading-relaxed text-slate-600 text-center pt-2 pb-1">
+        CDE Esquadrias · Protótipo demonstrativo · imagens e medidas fictícias
+      </p>
+    </div>
+  </aside>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ==========================================================
+     1. MOCK DATABASE — produtos, cores e vidros
+     ========================================================== */
+
+  const CORES = [
+    { id: 'preto',  nome: 'Preto',  hex: '#202329', light: '#43494f', dark: '#0c0e11', swatch: '#202329' },
+    { id: 'branco', nome: 'Branco', hex: '#e9ecf0', light: '#ffffff', dark: '#aeb5bf', swatch: '#e9ecf0' },
+    { id: 'bronze', nome: 'Bronze', hex: '#7a5330', light: '#a97b4c', dark: '#452d1b', swatch: '#7a5330' }
+  ];
+
+  const VIDROS = [
+    { id: 'incolor', nome: 'Incolor', fill: 'rgba(204,231,242,0.30)', swatch: 'linear-gradient(135deg,#e6f4fa,#b3d6e5)' },
+    { id: 'verde',   nome: 'Verde',   fill: 'rgba(118,190,150,0.38)', swatch: 'linear-gradient(135deg,#a9e2c3,#5fb184)' },
+    { id: 'fume',    nome: 'Fumê',    fill: 'rgba(58,62,70,0.52)',    swatch: 'linear-gradient(135deg,#71767e,#2c3036)' }
+  ];
+
+  const PRODUTOS = [
+    {
+      id: 'porta-gold',
+      nome: 'Porta de Correr Linha Gold',
+      folhas: '3 folhas',
+      tipo: 'porta3',
+      dimensoes: { largura: 2.40, altura: 2.10 },
+      descricao: 'Alumínio linha Gold com 3 folhas de correr e vidro temperado 8&nbsp;mm. Ideal para varandas, salas e ambientes integrados.'
+    },
+    {
+      id: 'janela-suprema',
+      nome: 'Janela de Correr Suprema',
+      folhas: '2 folhas',
+      tipo: 'janela2',
+      dimensoes: { largura: 1.60, altura: 1.20 },
+      descricao: 'Linha Suprema com bandeira fixa e 2 folhas de correr. Excelente vedação acústica e acabamento premium.'
+    },
+    {
+      id: 'box-elegance',
+      nome: 'Box de Banheiro Elegance',
+      folhas: '2 folhas',
+      tipo: 'box',
+      dimensoes: { largura: 1.20, altura: 2.00 },
+      descricao: 'Box em vidro temperado 8&nbsp;mm com perfis Elegance, dobradiças e puxador em alumínio escovado.'
+    }
+  ];
+
+  /* ==========================================================
+     2. ESTADO DA APLICAÇÃO
+     ========================================================== */
+
+  const state = {
+    img: null,
+    pts: [],                 // pontos em coordenadas do canvas "view"
+    produto: PRODUTOS[0],
+    cor: CORES[0],
+    vidro: VIDROS[0],
+    blend: 'multiply',
+    opacidade: 0.92,
+    escalaOverlay: 1
+  };
+
+  /* ==========================================================
+     3. REFERÊNCIAS DOM
+     ========================================================== */
+
+  const $ = (id) => document.getElementById(id);
+
+  const view     = $('view');
+  const overlay  = $('overlay');
+  const ui       = $('ui');
+  const vctx     = view.getContext('2d');
+  const octx     = overlay.getContext('2d');
+  const uctx     = ui.getContext('2d');
+  const wrap     = $('canvasWrap');
+  const dropzone = $('dropzone');
+  const toolbar  = $('toolbar');
+  const hint     = $('hint');
+
+  /* ==========================================================
+     4. TEXTURA PROCEDURAL DO PRODUTO
+     ========================================================== */
+
+  const texCache = { key: null, canvas: null };
+
+  function criarTextura(produto, cor, vidro) {
+    const S = 640;
+    const cv = document.createElement('canvas');
+    cv.width = S;
+    cv.height = S;
+    const g = cv.getContext('2d');
+    g.clearRect(0, 0, S, S);
+    g.lineJoin = 'round';
+
+    /* -- perfil de alumínio com gradiente metálico -- */
+    const metal = (x, y, w, h) => {
+      if (w <= 0 || h <= 0) return;
+      const lg = g.createLinearGradient(x, y, x + w, y + h);
+      lg.addColorStop(0.00, cor.light);
+      lg.addColorStop(0.35, cor.hex);
+      lg.addColorStop(0.72, cor.hex);
+      lg.addColorStop(1.00, cor.dark);
+      g.fillStyle = lg;
+      g.fillRect(x, y, w, h);
+    };
+
+    /* -- moldura em anel (4 barras) -- */
+    const anel = (x, y, w, h, fw) => {
+      metal(x,             y,             w,  fw);
+      metal(x,             y + h - fw,    w,  fw);
+      metal(x,             y,             fw, h);
+      metal(x + w - fw,    y,             fw, h);
+      // linha de sombra interna (profundidade)
+      g.strokeStyle = 'rgba(0,0,0,0.28)';
+      g.lineWidth = 1.5;
+      g.strokeRect(x + fw, y + fw, w - fw * 2, h - fw * 2);
+    };
+
+    /* -- pano de vidro com reflexos -- */
+    const panoVidro = (x, y, w, h) => {
+      if (w <= 0 || h <= 0) return;
+      g.save();
+      g.beginPath();
+      g.rect(x, y, w, h);
+      g.clip();
+
+      g.fillStyle = vidro.fill;
+      g.fillRect(x, y, w, h);
+
+      // brilho diagonal principal
+      const lg = g.createLinearGradient(x, y + h, x + w, y);
+      lg.addColorStop(0.00, 'rgba(255,255,255,0.00)');
+      lg.addColorStop(0.34, 'rgba(255,255,255,0.09)');
+      lg.addColorStop(0.48, 'rgba(255,255,255,0.26)');
+      lg.addColorStop(0.58, 'rgba(255,255,255,0.04)');
+      lg.addColorStop(1.00, 'rgba(255,255,255,0.12)');
+      g.fillStyle = lg;
+      g.fillRect(x, y, w, h);
+
+      // faixa de reflexo secundária
+      g.globalAlpha = 0.20;
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.moveTo(x + w * 0.56, y);
+      g.lineTo(x + w * 0.70, y);
+      g.lineTo(x + w * 0.40, y + h);
+      g.lineTo(x + w * 0.26, y + h);
+      g.closePath();
+      g.fill();
+
+      g.restore();
+    };
+
+    /* ---------- PORTAS / JANELAS ---------- */
+    if (produto.tipo === 'porta3') {
+      const fw = Math.round(S * 0.038);
+      anel(0, 0, S, S, fw);
+
+      const ix = fw, iy = fw, iw = S - fw * 2, ih = S - fw * 2;
+      const lw = iw / 3;
+      const lf = Math.round(S * 0.024);
+
+      for (let i = 0; i < 3; i++) {
+        const x = ix + i * lw;
+        panoVidro(x, iy, lw, ih);
+        anel(x, iy, lw, ih, lf);
+      }
+
+      // puxadores
+      metal(ix + lw - lf * 2.6, iy + ih * 0.42, lf * 0.95, ih * 0.16);
+      metal(ix + lw * 2 - lf * 2.6, iy + ih * 0.42, lf * 0.95, ih * 0.16);
+
+      // trilho inferior
+      metal(ix, iy + ih - lf * 0.9, iw, lf * 0.9);
+    }
+
+    if (produto.tipo === 'janela2') {
+      const fw = Math.round(S * 0.048);
+      anel(0, 0, S, S, fw);
+
+      const ix = fw, iy = fw, iw = S - fw * 2, ih = S - fw * 2;
+      const barraY = iy + ih * 0.24;
+      const barraH = Math.round(S * 0.030);
+
+      // bandeira fixa superior
+      panoVidro(ix, iy, iw, barraY - iy);
+      anel(ix, iy, iw, barraY - iy, Math.round(S * 0.020));
+
+      // barra horizontal divisória
+      metal(ix, barraY - barraH * 0.5, iw, barraH);
+
+      // 2 folhas de correr
+      const by = barraY + barraH * 0.5;
+      const bh = iy + ih - by;
+      const lw = iw / 2;
+      const lf = Math.round(S * 0.022);
+
+      for (let i = 0; i < 2; i++) {
+        const x = ix + i * lw;
+        panoVidro(x, by, lw, bh);
+        anel(x, by, lw, bh, lf);
+      }
+
+      // puxador
+      metal(ix + lw - lf * 2.6, by + bh * 0.40, lf * 0.95, bh * 0.20);
+      // trilho inferior
+      metal(ix, iy + ih - lf * 0.9, iw, lf * 0.9);
+    }
+
+    if (produto.tipo === 'box') {
+      const fw = Math.round(S * 0.022);
+      anel(0, 0, S, S, fw);
+
+      const ix = fw, iy = fw, iw = S - fw * 2, ih = S - fw * 2;
+
+      panoVidro(ix, iy, iw, ih);
+
+      // divisão da porta (folha móvel à direita)
+      const dx = ix + iw * 0.60;
+      metal(dx - fw * 0.45, iy, fw * 0.90, ih);
+
+      // dobradiças à esquerda
+      [0.10, 0.50, 0.90].forEach(t => {
+        metal(ix, iy + ih * t - ih * 0.045, iw * 0.045, ih * 0.09);
+      });
+
+      // puxador vertical
+      metal(dx + iw * 0.07, iy + ih * 0.44, iw * 0.024, ih * 0.22);
+
+      // barra toalheiro
+      metal(ix + iw * 0.10, iy + ih * 0.72, iw * 0.38, Math.max(4, ih * 0.014));
+
+      // rodapé / perfil inferior
+      metal(ix, iy + ih - fw * 0.9, iw, fw * 0.9);
+    }
+
+    return cv;
+  }
+
+  function obterTextura() {
+    const key = `${state.produto.id}|${state.cor.id}|${state.vidro.id}`;
+    if (texCache.key === key) return texCache.canvas;
+    texCache.canvas = criarTextura(state.produto, state.cor, state.vidro);
+    texCache.key = key;
+    return texCache.canvas;
+  }
+
+  /* ==========================================================
+     5. MOTOR DE PERSPECTIVA (HOMOGRAFIA 2D)
+     ========================================================== */
+
+  function homografia(pts) {
+    const [p0, p1, p2, p3] = pts; // TL, TR, BR, BL
+    const x0 = p0.x, y0 = p0.y;
+    const x1 = p1.x, y1 = p1.y;
+    const x2 = p2.x, y2 = p2.y;
+    const x3 = p3.x, y3 = p3.y;
+
+    const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+    const dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+
+    let a, b, c, d, e, f, g, h;
+
+    if (Math.abs(dx3) < 1e-9 && Math.abs(dy3) < 1e-9) {
+      a = x1 - x0; b = x3 - x0; c = x0;
+      d = y1 - y0; e = y3 - y0; f = y0;
+      g = 0; h = 0;
+    } else {
+      const det = dx1 * dy2 - dx2 * dy1;
+      if (Math.abs(det) < 1e-12) return null;
+      g = (dx3 * dy2 - dx2 * dy3) / det;
+      h = (dx1 * dy3 - dx3 * dy1) / det;
+      a = x1 - x0 + g * x1;
+      b = x3 - x0 + h * x3;
+      c = x0;
+      d = y1 - y0 + g * y1;
+      e = y3 - y0 + h * y3;
+      f = y0;
+    }
+
+    return [a, b, c, d, e, f, g, h, 1];
+  }
+
+  function inverter3x3(m) {
+    const [a, b, c, d, e, f, g, h, i] = m;
+
+    const A =  (e * i - f * h);
+    const B = -(d * i - f * g);
+    const C =  (d * h - e * g);
+    const D = -(b * i - c * h);
+    const E =  (a * i - c * g);
+    const F = -(a * h - b * g);
+    const G =  (b * f - c * e);
+    const H = -(a * f - c * d);
+    const I =  (a * e - b * d);
+
+    const det = a * A + b * B + c * C;
+    if (Math.abs(det) < 1e-12) return null;
+    const inv = 1 / det;
+
+    return [
+      A * inv, D * inv, G * inv,
+      B * inv, E * inv, H * inv,
+      C * inv, F * inv, I * inv
+    ];
+  }
+
+  function warpParaQuadrilatero(canvas, ctx, textura, pts) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const H = homografia(pts);
+    if (!H) return;
+    const I = inverter3x3(H);
+    if (!I) return;
+
+    const TW = textura.width;
+    const TH = textura.height;
+    const src = textura.getContext('2d').getImageData(0, 0, TW, TH).data;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of pts) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    minX = Math.max(0, Math.floor(minX));
+    minY = Math.max(0, Math.floor(minY));
+    maxX = Math.min(canvas.width  - 1, Math.ceil(maxX));
+    maxY = Math.min(canvas.height - 1, Math.ceil(maxY));
+
+    const W = maxX - minX + 1;
+    const Hh = maxY - minY + 1;
+    if (W <= 0 || Hh <= 0) return;
+
+    const imgData = ctx.createImageData(W, Hh);
+    const dst = imgData.data;
+
+    const i00 = I[0], i01 = I[1], i02 = I[2];
+    const i10 = I[3], i11 = I[4], i12 = I[5];
+    const i20 = I[6], i21 = I[7], i22 = I[8];
+
+    for (let y = 0; y < Hh; y++) {
+      const Y = minY + y + 0.5;
+      const rowBase = y * W * 4;
+
+      for (let x = 0; x < W; x++) {
+        const X = minX + x + 0.5;
+
+        const den = i20 * X + i21 * Y + i22;
+        if (den === 0) continue;
+
+        const u = (i00 * X + i01 * Y + i02) / den;
+        if (u < 0 || u > 1) continue;
+
+        const v = (i10 * X + i11 * Y + i12) / den;
+        if (v < 0 || v > 1) continue;
+
+        let fx = u * TW - 0.5;
+        let fy = v * TH - 0.5;
+        if (fx < 0) fx = 0; else if (fx > TW - 1) fx = TW - 1;
+        if (fy < 0) fy = 0; else if (fy > TH - 1) fy = TH - 1;
+
+        const x0 = fx | 0;
+        const y0 = fy | 0;
+        const x1 = x0 + 1 < TW ? x0 + 1 : TW - 1;
+        const y1 = y0 + 1 < TH ? y0 + 1 : TH - 1;
+
+        const ax = fx - x0;
+        const ay = fy - y0;
+
+        const w00 = (1 - ax) * (1 - ay);
+        const w10 = ax * (1 - ay);
+        const w01 = (1 - ax) * ay;
+        const w11 = ax * ay;
+
+        const o00 = (y0 * TW + x0) * 4;
+        const o10 = (y0 * TW + x1) * 4;
+        const o01 = (y1 * TW + x0) * 4;
+        const o11 = (y1 * TW + x1) * 4;
+
+        const o = rowBase + x * 4;
+
+        dst[o]     = src[o00]     * w00 + src[o10]     * w10 + src[o01]     * w01 + src[o11]     * w11;
+        dst[o + 1] = src[o00 + 1] * w00 + src[o10 + 1] * w10 + src[o01 + 1] * w01 + src[o11 + 1] * w11;
+        dst[o + 2] = src[o00 + 2] * w00 + src[o10 + 2] * w10 + src[o01 + 2] * w01 + src[o11 + 2] * w11;
+        dst[o + 3] = src[o00 + 3] * w00 + src[o10 + 3] * w10 + src[o01 + 3] * w01 + src[o11 + 3] * w11;
+      }
+    }
+
+    ctx.putImageData(imgData, minX, minY);
+  }
+
+  /* ==========================================================
+     6. ORDENAÇÃO DOS 4 PONTOS (TL, TR, BR, BL)
+     ========================================================== */
+
+  function ordenarPontos(pts) {
+    const n = pts.length;
+    if (n !== 4) return pts.slice();
+
+    const cx = pts.reduce((s, p) => s + p.x, 0) / 4;
+    const cy = pts.reduce((s, p) => s + p.y, 0) / 4;
+
+    let arr = pts.slice().sort(
+      (a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx)
+    );
+
+    let area = 0;
+    for (let i = 0; i < 4; i++) {
+      const a = arr[i];
+      const b = arr[(i + 1) % 4];
+      area += a.x * b.y - b.x * a.y;
+    }
+    if (area < 0) arr.reverse();
+
+    const ux = -0.70710678, uy = -0.70710678;
+    let melhor = 0, melhorScore = -Infinity;
+    arr.forEach((p, i) => {
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const len = Math.hypot(dx, dy) || 1;
+      const score = (dx / len) * ux + (dy / len) * uy;
+      if (score > melhorScore) { melhorScore = score; melhor = i; }
+    });
+
+    return arr.slice(melhor).concat(arr.slice(0, melhor));
+  }
+
+  /* ==========================================================
+     7. RENDERIZAÇÃO
+     ========================================================== */
+
+  function desenharBase() {
+    vctx.clearRect(0, 0, view.width, view.height);
+    if (state.img) vctx.drawImage(state.img, 0, 0, view.width, view.height);
+  }
+
+  function desenharUI() {
+    uctx.clearRect(0, 0, ui.width, ui.height);
+    const pts = state.pts;
+    if (!pts.length) return;
+
+    const ordem = pts.length === 4 ? ordenarPontos(pts) : pts;
+    const lw = Math.max(2, ui.width * 0.0045);
+
+    uctx.save();
+    uctx.lineJoin = 'round';
+    uctx.lineCap = 'round';
+
+    uctx.beginPath();
+    uctx.moveTo(ordem[0].x, ordem[0].y);
+    for (let i = 1; i < ordem.length; i++) uctx.lineTo(ordem[i].x, ordem[i].y);
+    if (ordem.length === 4) uctx.closePath();
+
+    uctx.shadowColor = 'rgba(230, 92, 0, 0.75)'; // Sombra laranja
+    uctx.shadowBlur = 14;
+    uctx.lineWidth = lw;
+    uctx.strokeStyle = 'rgba(230, 92, 0, 0.95)'; // Linha laranja
+    uctx.stroke();
+
+    uctx.shadowBlur = 0;
+    if (ordem.length === 4) {
+      uctx.fillStyle = 'rgba(230, 92, 0, 0.10)'; // Preenchimento laranja
+      uctx.fill();
+    }
+
+    const r = Math.max(10, ui.width * 0.015);
+    ordem.forEach((p, i) => {
+      uctx.beginPath();
+      uctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      uctx.fillStyle = 'rgba(18, 10, 7, 0.88)'; // Fundo do marcador escuro
+      uctx.fill();
+      uctx.lineWidth = Math.max(2, r * 0.30);
+      uctx.strokeStyle = '#e65c00'; // Borda laranja
+      uctx.stroke();
+
+      uctx.fillStyle = '#e65c00'; // Número laranja
+      uctx.font = `700 ${Math.round(r * 1.15)}px Inter, system-ui, sans-serif`;
+      uctx.textAlign = 'center';
+      uctx.textBaseline = 'middle';
+      uctx.fillText(String(i + 1), p.x, p.y + r * 0.06);
+    });
+
+    uctx.restore();
+  }
+
+  function desenharProduto() {
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    if (!state.img || state.pts.length !== 4) return;
+
+    const ordem = ordenarPontos(state.pts);
+    const s = state.escalaOverlay;
+    const ptsOverlay = ordem.map(p => ({ x: p.x * s, y: p.y * s }));
+
+    warpParaQuadrilatero(overlay, octx, obterTextura(), ptsOverlay);
+  }
+
+  let rafProduto = 0;
+  function agendarProduto() {
+    if (rafProduto) return;
+    rafProduto = requestAnimationFrame(() => {
+      rafProduto = 0;
+      desenharProduto();
+    });
+  }
+
+  function renderTudo() {
+    desenharBase();
+    desenharProduto();
+    desenharUI();
+  }
+
+  /* ==========================================================
+     8. CARREGAMENTO DA IMAGEM
+     ========================================================== */
+
+  function carregarArquivo(file) {
+    if (!file) return;
+    if (!file.type || !file.type.startsWith('image/')) {
+      alert('Por favor, selecione um arquivo de imagem.');
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      configurarCanvas(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      alert('Não foi possível carregar a imagem. Tente outra foto.');
+    };
+
+    img.src = url;
+  }
+
+  function configurarCanvas(img) {
+    const MAX_DIM = 1400;
+    const escala = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * escala));
+    const h = Math.max(1, Math.round(img.naturalHeight * escala));
+
+    view.width = w;  view.height = h;
+    ui.width   = w;  ui.height   = h;
+
+    const escalaOverlay = Math.min(1, 900 / w);
+    overlay.width  = Math.max(1, Math.round(w * escalaOverlay));
+    overlay.height = Math.max(1, Math.round(h * escalaOverlay));
+
+    state.img = img;
+    state.pts = [];
+    state.escalaOverlay = overlay.width / w;
+
+    dropzone.classList.add('hidden');
+    wrap.classList.remove('hidden');
+    toolbar.classList.remove('hidden');
+    wrap.classList.remove('fade-up');
+    void wrap.offsetWidth;      
+    wrap.classList.add('fade-up');
+
+    texCache.key = null;         
+    atualizarPassos();
+    atualizarDica();
+    renderTudo();
+  }
+
+  /* ==========================================================
+     9. INTERAÇÃO NO CANVAS (pointer events)
+     ========================================================== */
+
+  let arrastando = -1;
+
+  function pontoDoEvento(e) {
+    const rect = view.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (view.width / rect.width),
+      y: (e.clientY - rect.top)  * (view.height / rect.height)
+    };
+  }
+
+  function onPointerDown(e) {
+    if (!state.img) return;
+    e.preventDefault();
+    try { wrap.setPointerCapture(e.pointerId); } catch (_) {}
+
+    const p = pontoDoEvento(e);
+    const raio = Math.max(24, view.width * 0.035);
+
+    for (let i = 0; i < state.pts.length; i++) {
+      const d = Math.hypot(state.pts[i].x - p.x, state.pts[i].y - p.y);
+      if (d < raio) {
+        arrastando = i;
+        return;
+      }
+    }
+
+    if (state.pts.length < 4) {
+      state.pts.push(p);
+      arrastando = state.pts.length - 1;
+      atualizarPassos();
+      atualizarDica();
+      renderTudo();
+    }
+  }
+
+  function onPointerMove(e) {
+    if (arrastando < 0) return;
+    e.preventDefault();
+    state.pts[arrastando] = pontoDoEvento(e);
+    desenharUI();
+    agendarProduto();
+  }
+
+  function onPointerUp(e) {
+    if (arrastando < 0) return;
+    arrastando = -1;
+    try { wrap.releasePointerCapture(e.pointerId); } catch (_) {}
+    renderTudo();
+  }
+
+  wrap.addEventListener('pointerdown', onPointerDown);
+  wrap.addEventListener('pointermove', onPointerMove);
+  wrap.addEventListener('pointerup', onPointerUp);
+  wrap.addEventListener('pointercancel', onPointerUp);
+  wrap.addEventListener('pointerleave', (e) => { if (arrastando >= 0) onPointerUp(e); });
+
+  /* ==========================================================
+     10. SIDEBAR / CONFIGURAÇÕES
+     ========================================================== */
+
+  function montarProdutos() {
+    const sel = $('selProduto');
+    sel.innerHTML = PRODUTOS
+      .map(p => `<option value="${p.id}">${p.nome} · ${p.folhas}</option>`)
+      .join('');
+    sel.value = state.produto.id;
+
+    sel.addEventListener('change', () => {
+      const p = PRODUTOS.find(x => x.id === sel.value);
+      if (!p) return;
+      state.produto = p;
+      texCache.key = null;
+      atualizarInfoProduto();
+      atualizarPassos();
+      desenharProduto();
+    });
+
+    atualizarInfoProduto();
+  }
+
+  function atualizarInfoProduto() {
+    const p = state.produto;
+    const dim = `${p.dimensoes.largura.toFixed(2).replace('.', ',')} × ${p.dimensoes.altura.toFixed(2).replace('.', ',')} m`;
+    $('produtoInfo').innerHTML = `
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-slate-300 font-semibold">${p.folhas}</span>
+        <span class="text-accent font-bold">${dim}</span>
+      </div>
+      <p class="mt-1.5 leading-relaxed">${p.descricao}</p>
+    `;
+  }
+
+  function montarCores() {
+    const grid = $('gridCores');
+    grid.innerHTML = CORES.map(c => `
+      <button type="button" data-cor="${c.id}"
+              class="cor-btn flex flex-col items-center gap-1.5 rounded-xl border border-line bg-panel2 p-2 transition hover:border-accent/60 active:scale-95">
+        <span class="w-7 h-7 rounded-full ring-1 ring-white/10 shadow-inner" style="background:${c.swatch}"></span>
+        <span class="text-[10px] font-medium text-slate-400">${c.nome}</span>
+      </button>
+    `).join('');
+
+    grid.querySelectorAll('[data-cor]').forEach(btn => {
+      btn.addEventListener('click', () => selecionarCor(btn.dataset.cor));
+    });
+
+    selecionarCor(state.cor.id);
+  }
+
+  function selecionarCor(id) {
+    const cor = CORES.find(c => c.id === id);
+    if (!cor) return;
+    state.cor = cor;
+    $('gridCores').querySelectorAll('[data-cor]').forEach(b => {
+      b.classList.toggle('swatch-active', b.dataset.cor === id);
+    });
+    desenharProduto();
+  }
+
+  function montarVidros() {
+    const grid = $('gridVidros');
+    grid.innerHTML = VIDROS.map(v => `
+      <button type="button" data-vidro="${v.id}"
+              class="vidro-btn flex flex-col items-center gap-1.5 rounded-xl border border-line bg-panel2 p-2 transition hover:border-accent/60 active:scale-95">
+        <span class="w-7 h-7 rounded-md ring-1 ring-white/10" style="background:${v.swatch}"></span>
+        <span class="text-[10px] font-medium text-slate-400">${v.nome}</span>
+      </button>
+    `).join('');
+
+    grid.querySelectorAll('[data-vidro]').forEach(btn => {
+      btn.addEventListener('click', () => selecionarVidro(btn.dataset.vidro));
+    });
+
+    selecionarVidro(state.vidro.id);
+  }
+
+  function selecionarVidro(id) {
+    const v = VIDROS.find(x => x.id === id);
+    if (!v) return;
+    state.vidro = v;
+    $('gridVidros').querySelectorAll('[data-vidro]').forEach(b => {
+      b.classList.toggle('swatch-active', b.dataset.vidro === id);
+    });
+    desenharProduto();
+  }
+
+  function montarAjustesEsteticos() {
+    const selBlend = $('selBlend');
+    const range    = $('rangeOpacidade');
+    const lbl      = $('lblOpacidade');
+
+    const aplicar = () => {
+      overlay.style.mixBlendMode = state.blend === 'normal' ? 'normal' : state.blend;
+      overlay.style.opacity = String(state.opacidade);
+      lbl.textContent = Math.round(state.opacidade * 100) + '%';
+    };
+
+    selBlend.addEventListener('change', () => {
+      state.blend = selBlend.value;
+      aplicar();
+    });
+
+    range.addEventListener('input', () => {
+      state.opacidade = Number(range.value) / 100;
+      aplicar();
+    });
+
+    selBlend.value = state.blend;
+    range.value = String(Math.round(state.opacidade * 100));
+    aplicar();
+  }
+
+  /* ==========================================================
+     11. PASSOS / DICAS
+     ========================================================== */
+
+  function atualizarPassos() {
+    const temFoto   = !!state.img;
+    const temCantos = state.pts.length === 4;
+    const temProduto = !!state.produto;
+
+    const s1 = $('step1'), s2 = $('step2'), s3 = $('step3');
+
+    s1.dataset.state = temFoto ? 'done' : 'active';
+    s2.dataset.state = temCantos ? 'done' : (temFoto ? 'active' : 'idle');
+    s3.dataset.state = (temCantos && temProduto) ? 'done' : ((temCantos || temFoto) ? 'active' : 'idle');
+
+    if (temCantos && temProduto) s3.dataset.state = 'done';
+    if (!temFoto) { s2.dataset.state = 'idle'; s3.dataset.state = 'idle'; }
+  }
+
+  function atualizarDica() {
+    if (!state.img) { hint.classList.add('hidden'); return; }
+    hint.classList.remove('hidden');
+
+    const n = state.pts.length;
+    if (n === 0)      hint.textContent = 'Toque nos 4 cantos do vão, começando pelo superior esquerdo';
+    else if (n < 4)   hint.textContent = `Canto ${n} marcado · faltam ${4 - n}`;
+    else              hint.textContent = 'Vão demarcado ✓ · ajuste o produto ao lado';
+  }
+
+  /* ==========================================================
+     12. AÇÕES
+     ========================================================== */
+
+  function limparPontos() {
+    state.pts = [];
+    arrastando = -1;
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    atualizarPassos();
+    atualizarDica();
+    renderTudo();
+  }
+
+  function resetar() {
+    state.img = null;
+    state.pts = [];
+    arrastando = -1;
+    texCache.key = null;
+
+    vctx.clearRect(0, 0, view.width, view.height);
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    uctx.clearRect(0, 0, ui.width, ui.height);
+
+    wrap.classList.add('hidden');
+    toolbar.classList.add('hidden');
+    dropzone.classList.remove('hidden');
+
+    $('inputGaleria').value = '';
+    $('inputCamera').value = '';
+
+    atualizarPassos();
+    atualizarDica();
+  }
+
+  function compositeOp(blend) {
+    switch (blend) {
+      case 'multiply':   return 'multiply';
+      case 'overlay':    return 'overlay';
+      case 'soft-light': return 'soft-light';
+      default:           return 'source-over';
+    }
+  }
+
+  function salvarImagem() {
+    if (!state.img) return;
+
+    const out = document.createElement('canvas');
+    out.width = view.width;
+    out.height = view.height;
+    const g = out.getContext('2d');
+
+    g.drawImage(view, 0, 0);
+
+    if (state.pts.length === 4) {
+      g.globalAlpha = state.opacidade;
+      g.globalCompositeOperation = compositeOp(state.blend);
+      g.drawImage(overlay, 0, 0, out.width, out.height);
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = 'source-over';
+    }
+
+    const link = document.createElement('a');
+    link.download = `CDE-esquadrialab-${state.produto.id}-${Date.now()}.png`;
+    link.href = out.toDataURL('image/png');
+    link.click();
+  }
+
+  /* ==========================================================
+     13. BOOTSTRAP
+     ========================================================== */
+
+  $('inputGaleria').addEventListener('change', (e) => {
+    carregarArquivo(e.target.files && e.target.files[0]);
+  });
+  $('inputCamera').addEventListener('change', (e) => {
+    carregarArquivo(e.target.files && e.target.files[0]);
+  });
+
+  $('btnLimpar').addEventListener('click', limparPontos);
+  $('btnTrocar').addEventListener('click', resetar);
+  $('btnSalvar').addEventListener('click', salvarImagem);
+
+  wrap.addEventListener('dragstart', (e) => e.preventDefault());
+  wrap.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  function init() {
+    montarProdutos();
+    montarCores();
+    montarVidros();
+    montarAjustesEsteticos();
+    atualizarPassos();
+    atualizarDica();
+  }
+
+  init();
+
+})();
+</script>
+</body>
+</html>
